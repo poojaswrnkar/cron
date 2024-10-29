@@ -1,4 +1,4 @@
-name: Terraform Cloud Apply with Retr
+name: Terraform Cloud Apply with Retry
 
 on:
   workflow_dispatch:
