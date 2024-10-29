@@ -1,0 +1,24 @@
+name: Terraform Workflow
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Adjust the cron expression as needed
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Upload Configuration
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
+        id: upload
+        with:
+          workspace: "${{ secrets.WORKSPACE_NAME }}"  # Your Terraform workspace name
+          directory: "."
+        env:
+          TF_CLOUD_ORGANIZATION: "${{ secrets.ORG_NAME }}"  # Your Terraform Cloud organization
+          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"  # Use your TF API token here
