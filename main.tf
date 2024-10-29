@@ -1,16 +1,26 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 3.0"
+    }
+  }
+}
+
 provider "aws" {
-  region     = var.region
-  access_key = var.aws_access_key_id
-  secret_key = var.aws_secret_access_key
+  region = "us-west-1"  # Change to your desired region
+}
+
+variable "instance_name" {
+  description = "Name of the EC2 instance"
+  default     = "TerraformEC2"
 }
 
 resource "aws_instance" "server" {
-  ami           = "ami-0c55b159cbfafe1f0"  # Example AMI, choose as per region
-  instance_type = var.instance_type
-
+  ami           = "ami-0c55b159cbfafe1f0"  # Change to your preferred AMI
+  instance_type = "t2.micro"
   tags = {
-    Name        = var.instance_name
-    Environment = var.environment
+    Name = var.instance_name
   }
 }
 
