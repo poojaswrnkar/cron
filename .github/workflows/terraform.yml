@@ -1,14 +1,6 @@
-name: Terraform Cloud Workfloww
+name: Terraform Cloud Apply with Retry
+
 on:
-  push:
-    branches:
-      - main  # or your default branch name
-  pull_request:
-    branches:
-      - main  # or your default branch name
-  schedule:
-    - cron: '0 8 * * 1-5'   # 8 AM UTC Monday-Friday
-    - cron: '0 18 * * 1-5'  # 6 PM UTC Monday-Friday
   workflow_dispatch:
 
 jobs:
@@ -19,60 +11,71 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          ref: ${{ github.ref }}
+          fetch-depth: 1
 
-      - name: Determine action based on time
-        id: check-time
-        run: |
-          HOUR=$(date +%H)
-          if [ $HOUR -ge 8 ] && [ $HOUR -lt 18 ]; then
-            echo "action=create" >> $GITHUB_OUTPUT
-          else
-            echo "action=destroy" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Setup Terraform Cloud credentials
-        run: |
-          cat > $HOME/.terraformrc << EOF
-          credentials "app.terraform.io" {
-            token = "${{ secrets.TF_API_TOKEN }}"
-          }
-          EOF
-
-      - name: Upload to Terraform Cloud
+      - name: Upload Configuration
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
         id: upload
-        env:
-          TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
-          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
         with:
-          workspace: ${{ secrets.TF_WORKSPACE }}
+          workspace: "${{ secrets.WORKSPACE_NAME }}"
           directory: "."
-          speculative: false
-
-      - name: Check Workspace Lock Status
-        id: check-lock
-        run: |
-          response=$(curl -s -H "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
-            -H "Content-Type: application/vnd.api+json" \
-            "https://app.terraform.io/api/v2/organizations/${{ secrets.TF_CLOUD_ORGANIZATION }}/workspaces/${{ secrets.TF_WORKSPACE }}")
-          
-          locked=$(echo $response | jq -r '.data.attributes.locked')
-          echo "workspace_locked=$locked" >> $GITHUB_ENV
-
-      - name: Create Run in Terraform Cloud
-        if: steps.upload.outcome == 'success' && env.workspace_locked == 'false'
-        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.0.0
-        id: run
         env:
-          TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
-          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-        with:
-          workspace: ${{ secrets.TF_WORKSPACE }}
-          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
-          plan_only: false
-          destroy: ${{ steps.check-time.outputs.action == 'destroy' }}
+          TF_CLOUD_ORGANIZATION: "${{ secrets.ORG_NAME }}"
+          TF_API_TOKEN: "${{ secrets.TERRAFORM_API_TOKEN }}"
 
-      - name: Handle Locked Workspace
-        if: steps.upload.outcome == 'success' && env.workspace_locked == 'true'
-        run: echo "The workspace is currently locked. Please unlock it to proceed."
+      - name: Trigger Apply Run
+        id: apply
+        run: |
+          response=$(curl --silent --header "Authorization: Bearer ${{ secrets.TERRAFORM_API_TOKEN }}" \
+                           --header "Content-Type: application/vnd.api+json" \
+                           --request POST \
+                           --data '{
+                             "data": {
+                               "type": "runs",
+                               "relationships": {
+                                 "workspace": {
+                                   "data": {
+                                     "type": "workspaces",
+                                     "id": "${{ secrets.WORKSPACE_ID }}"
+                                   }
+                                 }
+                               }
+                             }
+                           }' \
+                           https://app.terraform.io/api/v2/runs)
+          echo "Response: $response"  # Log the response for debugging
+          echo "$response" > response.json
+
+      - name: Extract run_id
+        id: extract_run_id
+        run: |
+          run_id=$(jq -r '.data.id' response.json)
+          echo "::set-output name=apply_run_id::$run_id"
+
+      - name: Retry Approve Apply Plan if Failed
+        run: |
+          attempts=0
+          max_attempts=3
+          while [ $attempts -lt $max_attempts ]; do
+            response=$(curl --silent --header "Authorization: Bearer ${{ secrets.TERRAFORM_API_TOKEN }}" \
+                             --header "Content-Type: application/vnd.api+json" \
+                             --request POST \
+                             --data '{
+                               "data": {
+                                 "type": "runs",
+                                 "attributes": {
+                                   "status": "confirmed"
+                                 }
+                               }
+                             }' \
+                             https://app.terraform.io/api/v2/runs/${{ steps.extract_run_id.outputs.apply_run_id }}/actions/confirm)
+            if [[ $? -eq 0 ]]; then
+              echo "Apply confirmed successfully."
+              break
+            fi
+            attempts=$((attempts+1))
+            echo "Attempt $attempts failed, retrying in 10 seconds..."
+            sleep 10
+          done
+        env:
+          TF_API_TOKEN: "${{ secrets.TERRAFORM_API_TOKEN }}"
