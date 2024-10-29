@@ -1,24 +1,72 @@
-name: Terraform Workflow
-
+name: AWS Instance Lifecycle Management
 on:
   schedule:
-    - cron: '0 * * * *'  # Adjust the cron expression as needed
-  workflow_dispatch:
+    # Create instance at 8 AM UTC Monday-Friday
+    - cron: '0 8 * * 1-5'
+    # Destroy instance at 6 PM UTC Monday-Friday
+    - cron: '0 18 * * 1-5'
+  workflow_dispatch:  # Keep manual trigger option
 
 jobs:
-  terraform:
+  determine_action:
     runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.check-time.outputs.action }}
+    steps:
+      - name: Determine action based on time
+        id: check-time
+        run: |
+          HOUR=$(date +%H)
+          if [ $HOUR -ge 8 ] && [ $HOUR -lt 18 ]; then
+            echo "action=create" >> $GITHUB_OUTPUT
+          else
+            echo "action=destroy" >> $GITHUB_OUTPUT
+          fi
 
+  terraform:
+    needs: determine_action
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Upload Configuration
-        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
-        id: upload
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
         with:
-          workspace: "${{ secrets.WORKSPACE_NAME }}"  # Your Terraform workspace name
-          directory: "."
+          terraform_version: "1.0.0"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: |
+          if [[ "${{ needs.determine_action.outputs.action }}" == "create" ]]; then
+            terraform plan
+          else
+            terraform plan -destroy
+          fi
         env:
-          TF_CLOUD_ORGANIZATION: "${{ secrets.ORG_NAME }}"  # Your Terraform Cloud organization
-          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"  # Use your TF API token here
+          TF_VAR_instance_name: ${{ vars.INSTANCE_NAME }}
+          TF_VAR_environment: ${{ vars.ENVIRONMENT }}
+          TF_VAR_aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          TF_VAR_aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Terraform Apply
+        run: |
+          if [[ "${{ needs.determine_action.outputs.action }}" == "create" ]]; then
+            terraform apply -auto-approve
+          else
+            terraform destroy -auto-approve
+          fi
+        env:
+          TF_VAR_instance_name: ${{ vars.INSTANCE_NAME }}
+          TF_VAR_environment: ${{ vars.ENVIRONMENT }}
+          TF_VAR_aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          TF_VAR_aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
