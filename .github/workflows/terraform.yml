@@ -1,0 +1,81 @@
+name: Terraform Cloud Apply with Retr
+
+on:
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Upload Configuration
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
+        id: upload
+        with:
+          workspace: "${{ secrets.WORKSPACE_NAME }}"
+          directory: "."
+        env:
+          TF_CLOUD_ORGANIZATION: "${{ secrets.ORG_NAME }}"
+          TF_API_TOKEN: "${{ secrets.TERRAFORM_API_TOKEN }}"
+
+      - name: Trigger Apply Run
+        id: apply
+        run: |
+          response=$(curl --silent --header "Authorization: Bearer ${{ secrets.TERRAFORM_API_TOKEN }}" \
+                           --header "Content-Type: application/vnd.api+json" \
+                           --request POST \
+                           --data '{
+                             "data": {
+                               "type": "runs",
+                               "relationships": {
+                                 "workspace": {
+                                   "data": {
+                                     "type": "workspaces",
+                                     "id": "${{ secrets.WORKSPACE_ID }}"
+                                   }
+                                 }
+                               }
+                             }
+                           }' \
+                           https://app.terraform.io/api/v2/runs)
+          echo "Response: $response"  # Log the response for debugging
+          echo "$response" > response.json
+
+      - name: Extract run_id
+        id: extract_run_id
+        run: |
+          run_id=$(jq -r '.data.id' response.json)
+          echo "::set-output name=apply_run_id::$run_id"
+
+      - name: Retry Approve Apply Plan if Failed
+        run: |
+          attempts=0
+          max_attempts=3
+          while [ $attempts -lt $max_attempts ]; do
+            response=$(curl --silent --header "Authorization: Bearer ${{ secrets.TERRAFORM_API_TOKEN }}" \
+                             --header "Content-Type: application/vnd.api+json" \
+                             --request POST \
+                             --data '{
+                               "data": {
+                                 "type": "runs",
+                                 "attributes": {
+                                   "status": "confirmed"
+                                 }
+                               }
+                             }' \
+                             https://app.terraform.io/api/v2/runs/${{ steps.extract_run_id.outputs.apply_run_id }}/actions/confirm)
+            if [[ $? -eq 0 ]]; then
+              echo "Apply confirmed successfully."
+              break
+            fi
+            attempts=$((attempts+1))
+            echo "Attempt $attempts failed, retrying in 10 seconds..."
+            sleep 10
+          done
+        env:
+          TF_API_TOKEN: "${{ secrets.TERRAFORM_API_TOKEN }}"
