@@ -3,10 +3,10 @@ variable "region" {
   default     = "us-west-2"  # Set a default region or leave it empty
 }
 
-variable "instance_name" {
-  description = "Name of the EC2 instance"
-  type        = string
-}
+# variable "instance_name" {
+#   description = "Name of the EC2 instance"
+#   type        = string
+# }
 
 variable "instance_type" {
   description = "EC2 instance type"
