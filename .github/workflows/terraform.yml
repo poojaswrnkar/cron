@@ -1,4 +1,4 @@
-name: Terraform Cloud Apply with Retry
+name: Terraform Cloud Apply with Retryy
 
 on:
   schedule:
