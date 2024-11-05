@@ -7,8 +7,24 @@ terraform {
   }
 }
 
+terraform { 
+  cloud { 
+  
+    organization = "Devops_LL" 
+
+    workspaces { 
+      name = "new-p-cron" 
+    } 
+  } 
+}
+
 provider "aws" {
-  region = "us-west-1"  # Change to your desired region
+  region = "us-east-1"  # Change to your desired region
+}
+
+variable "instance_name" {
+  description = "Name of the EC2 instance"
+  default     = "TerraformEC2"
 }
 
 resource "aws_instance" "server" {
