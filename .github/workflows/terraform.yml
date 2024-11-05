@@ -20,7 +20,7 @@ jobs:
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
         id: upload
         with:
-          workspace: "${{ secrets.WORKSPACE_NAME }}"  # Update to your Terraform workspace name
+          workspace: "${{ secrets.TF_WORKSPACE }}"  # Update to your Terraform workspace name
           directory: "." 
         env:
           TF_CLOUD_ORGANIZATION: "${{ secrets.ORG_NAME }}"  # Update to your Terraform Cloud organization
@@ -40,7 +40,7 @@ jobs:
                   "workspace": {
                     "data": {
                       "type": "workspaces",
-                      "id": "${{ secrets.WORKSPACE_ID }}"
+                      "id": "${{ secrets.TF_WORKSPACE }}"
                     }
                   }
                 }
