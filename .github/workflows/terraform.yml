@@ -23,7 +23,7 @@ jobs:
           workspace: "${{ secrets.TF_WORKSPACE }}"  # Update to your Terraform workspace name
           directory: "." 
         env:
-          TF_CLOUD_ORGANIZATION: "${{ secrets.ORG_NAME }}"  # Update to your Terraform Cloud organization
+          TF_CLOUD_ORGANIZATION: "${{ secrets.TF_CLOUD_ORGANIZATION }}"  # Update to your Terraform Cloud organization
           TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
 
       - name: Trigger Apply Run
