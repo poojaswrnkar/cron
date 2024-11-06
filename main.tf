@@ -25,7 +25,7 @@ provider "aws" {
 }
 
 variable "instance_name" {
-  description = "Name of the EC2 instance"
+  description = "Name of the EC2 server"
   default     = "TerraformEC2"
 }
 
