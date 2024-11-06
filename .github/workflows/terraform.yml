@@ -31,71 +31,106 @@ jobs:
         env:
           TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
           TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-          TF_HOSTNAME: "app.terraform.io"  # Add this if you're using Terraform Cloud
 
-      - name: Create and Apply Run
-        id: apply
-        env:
-          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-          WORKSPACE_ID: ${{ secrets.TF_WORKSPACE }}
-          TF_ORG: ${{ secrets.TF_CLOUD_ORGANIZATION }}
+      - name: Create Run
+        id: create_run
         run: |
-          # Create the run
-          RESPONSE=$(curl \
-            --header "Authorization: Bearer ${TF_API_TOKEN}" \
+          RESPONSE=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
             --header "Content-Type: application/vnd.api+json" \
             --request POST \
-            --data "{\"data\": {\"attributes\": {\"is-destroy\":false,\"message\": \"Triggered by GitHub Actions\"},\"type\":\"runs\",\"relationships\": {\"workspace\": {\"data\": {\"type\": \"workspaces\",\"id\": \"${WORKSPACE_ID}\"}}}}}" \
-            https://app.terraform.io/api/v2/organizations/${TF_ORG}/workspaces/${WORKSPACE_ID}/runs)
-          
-          # Extract run ID
-          RUN_ID=$(echo $RESPONSE | jq -r '.data.id')
-          echo "RUN_ID=${RUN_ID}" >> $GITHUB_OUTPUT
-          
-          if [ -z "$RUN_ID" ]; then
-            echo "Failed to create run. Response:"
-            echo $RESPONSE
+            --data "{
+              \"data\": {
+                \"attributes\": {
+                  \"is-destroy\": false,
+                  \"message\": \"Triggered by GitHub Actions\"
+                },
+                \"type\": \"runs\",
+                \"relationships\": {
+                  \"workspace\": {
+                    \"data\": {
+                      \"type\": \"workspaces\",
+                      \"id\": \"${{ secrets.TF_WORKSPACE }}\"
+                    }
+                  }
+                }
+              }
+            }" \
+            "https://app.terraform.io/api/v2/runs")
+
+          # Save response for debugging
+          echo "$RESPONSE" > run_response.json
+
+          # Extract and verify run ID
+          RUN_ID=$(echo "$RESPONSE" | jq -r '.data.id')
+          if [ "$RUN_ID" = "null" ] || [ -z "$RUN_ID" ]; then
+            echo "Error: Failed to get run ID from response"
+            echo "Response was:"
+            cat run_response.json
             exit 1
           fi
 
+          # Set output for next step
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Created run with ID: $RUN_ID"
+
       - name: Wait and Confirm Apply
-        if: steps.apply.outputs.RUN_ID != ''
+        if: success()
         env:
           TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-          RUN_ID: ${{ steps.apply.outputs.RUN_ID }}
+          RUN_ID: ${{ steps.create_run.outputs.run_id }}
         run: |
-          attempts=0
-          max_attempts=3
-          
-          while [ $attempts -lt $max_attempts ]; do
-            # Check run status
-            STATUS=$(curl \
-              --header "Authorization: Bearer ${TF_API_TOKEN}" \
-              --silent \
-              https://app.terraform.io/api/v2/runs/${RUN_ID} | jq -r '.data.attributes.status')
-            
-            if [ "$STATUS" = "planned" ]; then
-              # Confirm the apply
-              curl \
-                --header "Authorization: Bearer ${TF_API_TOKEN}" \
-                --header "Content-Type: application/vnd.api+json" \
-                --request POST \
-                --data '{"comment": "Auto-approved by GitHub Actions"}' \
-                https://app.terraform.io/api/v2/runs/${RUN_ID}/actions/apply
-              break
-            elif [ "$STATUS" = "errored" ]; then
-              echo "Run errored out"
-              exit 1
-            fi
-            
-            attempts=$((attempts+1))
-            if [ $attempts -lt $max_attempts ]; then
-              echo "Waiting for plan to complete... (attempt $attempts)"
-              sleep 30
-            fi
-          done
-          
-          if [ $attempts -eq $max_attempts ]; then
-            echo "Max attempts reached waiting for plan"
+          if [ -z "$RUN_ID" ]; then
+            echo "Error: RUN_ID is empty"
             exit 1
           fi
+
+          echo "Starting confirmation process for run: $RUN_ID"
+          attempts=0
+          max_attempts=5  # Increased attempts
+          wait_time=30    # Seconds between attempts
+
+          while [ $attempts -lt $max_attempts ]; do
+            echo "Checking run status (attempt $((attempts + 1)))"
+            
+            RESPONSE=$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $TF_API_TOKEN" \
+              "https://app.terraform.io/api/v2/runs/$RUN_ID")
+            
+            STATUS=$(echo "$RESPONSE" | jq -r '.data.attributes.status')
+            echo "Current status: $STATUS"
+
+            case "$STATUS" in
+              "planned")
+                echo "Plan is ready, confirming apply..."
+                curl --fail --silent --show-error \
+                  --header "Authorization: Bearer $TF_API_TOKEN" \
+                  --header "Content-Type: application/vnd.api+json" \
+                  --request POST \
+                  --data '{"comment": "Auto-approved by GitHub Actions"}' \
+                  "https://app.terraform.io/api/v2/runs/$RUN_ID/actions/apply"
+                echo "Apply confirmed successfully"
+                exit 0
+                ;;
+              "errored"|"discarded"|"canceled")
+                echo "Run failed with status: $STATUS"
+                exit 1
+                ;;
+              "applied"|"planned_and_finished")
+                echo "Run completed successfully with status: $STATUS"
+                exit 0
+                ;;
+              *)
+                echo "Waiting for plan to complete... (status: $STATUS)"
+                ;;
+            esac
+
+            attempts=$((attempts + 1))
+            if [ $attempts -lt $max_attempts ]; then
+              echo "Sleeping for $wait_time seconds..."
+              sleep $wait_time
+            fi
+          done
+
+          echo "Error: Max attempts ($max_attempts) reached waiting for plan"
+          exit 1
