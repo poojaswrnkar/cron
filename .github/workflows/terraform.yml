@@ -1,4 +1,4 @@
-name: Terraform Cloud Apply with Retry
+name: Terraform Cloud Apply
 
 on:
   schedule:
@@ -35,6 +35,19 @@ jobs:
       - name: Create Run
         id: create_run
         run: |
+          # First, verify the workspace exists and get its ID
+          WORKSPACE_RESPONSE=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
+            --header "Content-Type: application/vnd.api+json" \
+            "https://app.terraform.io/api/v2/organizations/${{ secrets.TF_CLOUD_ORGANIZATION }}/workspaces/${{ secrets.TF_WORKSPACE }}")
+          
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to verify workspace"
+            echo "Please check your organization name and workspace name"
+            exit 1
+          fi
+          
+          # Create the run using the correct endpoint
           RESPONSE=$(curl --fail --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
             --header "Content-Type: application/vnd.api+json" \
@@ -56,7 +69,7 @@ jobs:
                 }
               }
             }" \
-            "https://app.terraform.io/api/v2/runs")
+            "https://app.terraform.io/api/v2/organizations/${{ secrets.TF_CLOUD_ORGANIZATION }}/workspaces/${{ secrets.TF_WORKSPACE }}/runs")
 
           # Save response for debugging
           echo "$RESPONSE" > run_response.json
@@ -87,8 +100,8 @@ jobs:
 
           echo "Starting confirmation process for run: $RUN_ID"
           attempts=0
-          max_attempts=5  # Increased attempts
-          wait_time=30    # Seconds between attempts
+          max_attempts=5
+          wait_time=30
 
           while [ $attempts -lt $max_attempts ]; do
             echo "Checking run status (attempt $((attempts + 1)))"
