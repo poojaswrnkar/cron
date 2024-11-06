@@ -2,80 +2,100 @@ name: Terraform Cloud Apply with Retry
 
 on:
   schedule:
-    - cron: '0 8 * * 1-5'   # 8 AM UTC Monday-Friday
-    - cron: '0 18 * * 1-5'  # 6 PM UTC Monday-Friday
+    - cron: '0 8 * * 1-5'  # 8 AM UTC Monday-Friday
+    - cron: '0 18 * * 1-5' # 6 PM UTC Monday-Friday
   workflow_dispatch:
 
 jobs:
   terraform:
     runs-on: ubuntu-24.04
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 1
 
+      - name: Setup Terraform CLI
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
       - name: Upload Configuration
         uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
         id: upload
         with:
-          workspace: "${{ secrets.TF_WORKSPACE }}"  # Update to your Terraform workspace name
-          directory: "." 
+          workspace: ${{ secrets.TF_WORKSPACE }}
+          directory: "."
+          speculative: false
         env:
-          TF_CLOUD_ORGANIZATION: "${{ secrets.TF_CLOUD_ORGANIZATION }}"  # Update to your Terraform Cloud organization
-          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
+          TF_CLOUD_ORGANIZATION: ${{ secrets.TF_CLOUD_ORGANIZATION }}
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          TF_HOSTNAME: "app.terraform.io"  # Add this if you're using Terraform Cloud
 
-      - name: Trigger Apply Run
+      - name: Create and Apply Run
         id: apply
+        env:
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          WORKSPACE_ID: ${{ secrets.TF_WORKSPACE }}
+          TF_ORG: ${{ secrets.TF_CLOUD_ORGANIZATION }}
         run: |
-          curl \
-            --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
+          # Create the run
+          RESPONSE=$(curl \
+            --header "Authorization: Bearer ${TF_API_TOKEN}" \
             --header "Content-Type: application/vnd.api+json" \
             --request POST \
-            --data '{
-              "data": {
-                "type": "runs",
-                "relationships": {
-                  "workspace": {
-                    "data": {
-                      "type": "workspaces",
-                      "id": "${{ secrets.TF_WORKSPACE }}"
-                    }
-                  }
-                }
-              }
-            }' \
-            https://app.terraform.io/api/v2/runs \
-            --silent --show-error --fail --output response.json
+            --data "{\"data\": {\"attributes\": {\"is-destroy\":false,\"message\": \"Triggered by GitHub Actions\"},\"type\":\"runs\",\"relationships\": {\"workspace\": {\"data\": {\"type\": \"workspaces\",\"id\": \"${WORKSPACE_ID}\"}}}}}" \
+            https://app.terraform.io/api/v2/organizations/${TF_ORG}/workspaces/${WORKSPACE_ID}/runs)
+          
+          # Extract run ID
+          RUN_ID=$(echo $RESPONSE | jq -r '.data.id')
+          echo "RUN_ID=${RUN_ID}" >> $GITHUB_OUTPUT
+          
+          if [ -z "$RUN_ID" ]; then
+            echo "Failed to create run. Response:"
+            echo $RESPONSE
+            exit 1
+          fi
 
-      - name: Extract run_id
-        id: extract_run_id
-        run: |
-          run_id=$(jq -r '.data.id' response.json)
-          echo "::set-output name=apply_run_id::$run_id"
-
-      # Retry apply confirmation
-      - name: Retry Approve Apply Plan if Failed
+      - name: Wait and Confirm Apply
+        if: steps.apply.outputs.RUN_ID != ''
+        env:
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          RUN_ID: ${{ steps.apply.outputs.RUN_ID }}
         run: |
           attempts=0
           max_attempts=3
+          
           while [ $attempts -lt $max_attempts ]; do
-            curl \
-              --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
-              --header "Content-Type: application/vnd.api+json" \
-              --request POST \
-              --data '{
-                "data": {
-                  "type": "runs",
-                  "attributes": {
-                    "status": "confirmed"
-                  }
-                }
-              }' \
-              https://app.terraform.io/api/v2/runs/${{ steps.extract_run_id.outputs.apply_run_id }}/actions/confirm && break
+            # Check run status
+            STATUS=$(curl \
+              --header "Authorization: Bearer ${TF_API_TOKEN}" \
+              --silent \
+              https://app.terraform.io/api/v2/runs/${RUN_ID} | jq -r '.data.attributes.status')
+            
+            if [ "$STATUS" = "planned" ]; then
+              # Confirm the apply
+              curl \
+                --header "Authorization: Bearer ${TF_API_TOKEN}" \
+                --header "Content-Type: application/vnd.api+json" \
+                --request POST \
+                --data '{"comment": "Auto-approved by GitHub Actions"}' \
+                https://app.terraform.io/api/v2/runs/${RUN_ID}/actions/apply
+              break
+            elif [ "$STATUS" = "errored" ]; then
+              echo "Run errored out"
+              exit 1
+            fi
+            
             attempts=$((attempts+1))
-            sleep 10
+            if [ $attempts -lt $max_attempts ]; then
+              echo "Waiting for plan to complete... (attempt $attempts)"
+              sleep 30
+            fi
           done
-        env:
-          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
+          
+          if [ $attempts -eq $max_attempts ]; then
+            echo "Max attempts reached waiting for plan"
+            exit 1
+          fi
