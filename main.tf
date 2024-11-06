@@ -30,7 +30,7 @@ variable "instance_name" {
 }
 
 resource "aws_instance" "server" {
-  ami           = "ami-0c55b159cbfafe1f0"  # Change to your preferred AMI
+  ami           = "ami-0866a3c8686eaeeba"
   instance_type = "t2.micro"
   tags = {
     Name = var.instance_name
