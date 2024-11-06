@@ -27,4 +27,9 @@ variable "aws_secret_access_key" {
   description = "AWS Secret Access Key"
   type        = string
 }
+variable "ami" {
+  description = "AMI ID for the EC2 instance"
+  type        = string
+}
+
 
