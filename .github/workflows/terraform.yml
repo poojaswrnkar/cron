@@ -96,7 +96,7 @@ jobs:
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
             echo "Error: Failed to get run ID from response"
             echo "Response was:"
-            cat run_response.json
+            cat run_response.json  # Print the entire response for debugging
             exit 1
           fi
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
