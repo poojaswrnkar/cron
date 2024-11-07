@@ -33,8 +33,3 @@ variable "ami" {
 }
 
 
-variable "ami" {
-  description = "Ami id for server"
-  type        = string
-}
-
