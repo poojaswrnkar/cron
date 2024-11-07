@@ -2,15 +2,14 @@ name: Terraform Server Management
 
 on:
   schedule:
-    # Server creation at 3:15 PM UTC
-    - cron: '* * * * *'
-    
-  workflow_dispatch:  # Allows manual triggering of the workflow
+    - cron: '* * * * *'  # Runs every minute for testing
+
+  workflow_dispatch:
 
 jobs:
   terraform:
     runs-on: ubuntu-24.04
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -20,13 +19,12 @@ jobs:
       - name: Create or Destroy Run
         id: create_run
         run: |
-          # Get workspace ID using workspace name
-          echo "Fetching workspace ID..."
-          WORKSPACE_RESPONSE=$(curl --fail --silent --show-error \
+          # Fetch workspace ID
+          WORKSPACE_RESPONSE=$(curl --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
             --header "Content-Type: application/vnd.api+json" \
             "https://app.terraform.io/api/v2/organizations/${{ secrets.TF_CLOUD_ORGANIZATION }}/workspaces")
-          
+
           echo "$WORKSPACE_RESPONSE" > workspace_response.json
           
           WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r --arg NAME "${{ secrets.TF_WORKSPACE }}" '.data[] | select(.attributes.name == $NAME) | .id')
@@ -38,26 +36,22 @@ jobs:
             exit 1
           fi
           echo "Found workspace ID: $WORKSPACE_ID"
-          
+
           # Get current time in UTC
           current_time=$(date -u +%H:%M)
           echo "Current UTC time is $current_time"
-          
+
           # Determine action based on the schedule or testing
-          if [[ "$current_time" == "10:59" ]]; then  # Change this for testing
-            echo "Creating the server..."
+          if [[ "$current_time" == "10:59" ]]; then
             ACTION="Create"
             IS_DESTROY="false"
-          elif [[ "$current_time" == "11:00" ]]; then  # Change this for testing
-            echo "Destroying the server..."
+          elif [[ "$current_time" == "11:00" ]]; then
             ACTION="Destroy"
             IS_DESTROY="true"
           elif [[ "$current_time" == "15:15" ]]; then
-            echo "Creating the server..."
             ACTION="Create"
             IS_DESTROY="false"
           elif [[ "$current_time" == "15:20" ]]; then
-            echo "Destroying the server..."
             ACTION="Destroy"
             IS_DESTROY="true"
           else
@@ -66,8 +60,7 @@ jobs:
           fi
 
           # Create or destroy run based on the action
-          echo "Creating or destroying run..."
-          RESPONSE=$(curl --fail --silent --show-error \
+          RESPONSE=$(curl --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
             --header "Content-Type: application/vnd.api+json" \
             --request POST \
@@ -89,23 +82,18 @@ jobs:
               }
             }" \
             "https://app.terraform.io/api/v2/runs")
-          
-          echo "$RESPONSE" > run_response.json
-          
-          # Check for errors in response
-          if [ "$(echo "$RESPONSE" | jq -r '.errors')" != "null" ]; then
-            echo "Error creating run: $(echo "$RESPONSE" | jq -r '.errors')"
-            exit 1
-          fi
 
-          # Check for a valid RUN_ID
+          echo "$RESPONSE" > run_response.json
+
+          # Extract RUN_ID from the response
           RUN_ID=$(echo "$RESPONSE" | jq -r '.data.id')
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
             echo "Error: Failed to get run ID from response"
-            echo "Response was:"
+            echo "Full response:"
             cat run_response.json  # Print the entire response for debugging
             exit 1
           fi
+          
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "Created run with ID: $RUN_ID"
 
@@ -128,7 +116,7 @@ jobs:
           while [ $attempts -lt $max_attempts ]; do
             echo "Checking run status (attempt $((attempts + 1)))"
             
-            RESPONSE=$(curl --fail --silent --show-error \
+            RESPONSE=$(curl --silent --show-error \
               --header "Authorization: Bearer $TF_API_TOKEN" \
               "https://app.terraform.io/api/v2/runs/$RUN_ID")
             
@@ -137,7 +125,7 @@ jobs:
             case "$STATUS" in
               "planned")
                 echo "Plan is ready, confirming apply or destroy..."
-                curl --fail --silent --show-error \
+                curl --silent --show-error \
                   --header "Authorization: Bearer $TF_API_TOKEN" \
                   --header "Content-Type: application/vnd.api+json" \
                   --request POST \
