@@ -3,10 +3,10 @@ name: Terraform Server Management
 on:
   schedule:
     # Server creation at 3:15 PM UTC
-    - cron: '0 11 * * *'
+    - cron: '15 3 * * *'
     # Server destruction at 3:20 PM UTC
-    - cron: '10 11 * * *'
-  workflow_dispatch:
+    - cron: '20 3 * * *'
+  workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
   terraform:
@@ -45,11 +45,11 @@ jobs:
           echo "Current UTC time is $current_time"
           
           # Determine action based on the schedule or testing
-          if [[ "$current_time" == "10:02" ]]; then  # Change this for testing
+          if [[ "$current_time" == "10:59" ]]; then  # Change this for testing
             echo "Creating the server..."
             ACTION="Create"
             IS_DESTROY="false"
-          elif [[ "$current_time" == "10:03" ]]; then  # Change this for testing
+          elif [[ "$current_time" == "11:00" ]]; then  # Change this for testing
             echo "Destroying the server..."
             ACTION="Destroy"
             IS_DESTROY="true"
