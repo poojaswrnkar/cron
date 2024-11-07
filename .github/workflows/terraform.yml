@@ -2,9 +2,8 @@ name: Terraform Server Management
 
 on:
   schedule:
-    # Server creation at 3:15 PM UTC
-    - cron: '* * * * *'
-    
+    - cron: '55 11 * * *'  # Adjust as needed
+
   workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
@@ -20,7 +19,6 @@ jobs:
       - name: Create or Destroy Run
         id: create_run
         run: |
-          # Get workspace ID using workspace name
           echo "Fetching workspace ID..."
           WORKSPACE_RESPONSE=$(curl --fail --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
@@ -39,16 +37,14 @@ jobs:
           fi
           echo "Found workspace ID: $WORKSPACE_ID"
           
-          # Get current time in UTC
           current_time=$(date -u +%H:%M)
           echo "Current UTC time is $current_time"
           
-          # Determine action based on the schedule or testing
-          if [[ "$current_time" == "10:59" ]]; then  # Adjust for testing
+          if [[ "$current_time" == "10:59" ]]; then
             echo "Creating the server..."
             ACTION="Create"
             IS_DESTROY="false"
-          elif [[ "$current_time" == "11:00" ]]; then  # Adjust for testing
+          elif [[ "$current_time" == "11:00" ]]; then
             echo "Destroying the server..."
             ACTION="Destroy"
             IS_DESTROY="true"
@@ -57,7 +53,6 @@ jobs:
             exit 0
           fi
 
-          # Create or destroy run based on the action
           echo "Creating or destroying run..."
           RESPONSE=$(curl --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
@@ -83,12 +78,8 @@ jobs:
             "https://app.terraform.io/api/v2/runs")
           
           echo "$RESPONSE" > run_response.json
-
-          # Check for errors in response
-          if [ "$(echo "$RESPONSE" | jq -r '.errors')" != "null" ]; then
-            echo "Error creating run: $(echo "$RESPONSE" | jq -r '.errors')"
-            exit 1
-          fi
+          echo "Response from API:"
+          cat run_response.json  # Log the full response for debugging
 
           # Check for a valid RUN_ID
           RUN_ID=$(echo "$RESPONSE" | jq -r '.data.id')
