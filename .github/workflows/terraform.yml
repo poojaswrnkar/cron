@@ -2,8 +2,10 @@ name: Terraform Cloud Apply with Retry
 
 on:
   schedule:
-    - cron: '0 8 * * 1-5'  # 8 AM UTC Monday-Friday
-    - cron: '0 18 * * 1-5' # 6 PM UTC Monday-Friday
+    # Create server at 8 AM UTC Monday-Friday
+    - cron: '0 8 * * 1-5'  # 8 AM UTC Monday-Friday (Create)
+    # Destroy server at 6 PM UTC Monday-Friday
+    - cron: '0 18 * * 1-5'  # 6 PM UTC Monday-Friday (Destroy)
   workflow_dispatch:
 
 jobs:
@@ -16,20 +18,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create Run
-        id: create_run
+      - name: Create or Destroy Server
+        id: create_destroy
         run: |
-          # First get the workspace ID using workspace name
+          # Check current time or cron job time to decide if we create or destroy
+          current_time=$(date +"%H:%M")
+          echo "Current time: $current_time"
+          
+          if [[ "$current_time" == "08:00" ]]; then
+            echo "Triggering server creation..."
+            ACTION="create"
+            IS_DESTROY="false"
+          elif [[ "$current_time" == "18:00" ]]; then
+            echo "Triggering server destruction..."
+            ACTION="destroy"
+            IS_DESTROY="true"
+          else
+            echo "No action to perform at this time"
+            exit 0
+          fi
+
+          # Fetch workspace ID
           echo "Fetching workspace ID..."
           WORKSPACE_RESPONSE=$(curl --fail --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
             --header "Content-Type: application/vnd.api+json" \
             "https://app.terraform.io/api/v2/organizations/${{ secrets.TF_CLOUD_ORGANIZATION }}/workspaces")
-
-          # Save workspace response for debugging
           echo "$WORKSPACE_RESPONSE" > workspace_response.json
-
-          # Extract workspace ID for the workspace name we want
+          
           WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r --arg NAME "${{ secrets.TF_WORKSPACE }}" '.data[] | select(.attributes.name == $NAME) | .id')
           
           if [ -z "$WORKSPACE_ID" ]; then
@@ -38,11 +54,10 @@ jobs:
             echo "$WORKSPACE_RESPONSE" | jq -r '.data[].attributes.name'
             exit 1
           fi
-
           echo "Found workspace ID: $WORKSPACE_ID"
-
-          # Create the run using workspace ID
-          echo "Creating run..."
+          
+          # Create or destroy run based on the action (create or destroy)
+          echo "Creating or destroying run..."
           RESPONSE=$(curl --fail --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
             --header "Content-Type: application/vnd.api+json" \
@@ -50,8 +65,8 @@ jobs:
             --data "{
               \"data\": {
                 \"attributes\": {
-                  \"is-destroy\": false,
-                  \"message\": \"Triggered by GitHub Actions\"
+                  \"is-destroy\": $IS_DESTROY,
+                  \"message\": \"Triggered by GitHub Actions - $ACTION\"
                 },
                 \"type\": \"runs\",
                 \"relationships\": {
@@ -65,11 +80,9 @@ jobs:
               }
             }" \
             "https://app.terraform.io/api/v2/runs")
-
-          # Save run response for debugging
+          
           echo "$RESPONSE" > run_response.json
-
-          # Extract run ID
+          
           RUN_ID=$(echo "$RESPONSE" | jq -r '.data.id')
           if [ "$RUN_ID" = "null" ] || [ -z "$RUN_ID" ]; then
             echo "Error: Failed to get run ID from response"
@@ -77,26 +90,23 @@ jobs:
             cat run_response.json
             exit 1
           fi
-
           echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
           echo "Created run with ID: $RUN_ID"
-
-      - name: Wait and Confirm Apply
+      
+      - name: Wait and Confirm Apply/Destroy
         if: success()
         env:
           TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-          RUN_ID: ${{ steps.create_run.outputs.run_id }}
+          RUN_ID: ${{ steps.create_destroy.outputs.run_id }}
         run: |
           if [ -z "$RUN_ID" ]; then
             echo "Error: RUN_ID is empty"
             exit 1
           fi
-
           echo "Starting confirmation process for run: $RUN_ID"
           attempts=0
           max_attempts=5
           wait_time=30
-
           while [ $attempts -lt $max_attempts ]; do
             echo "Checking run status (attempt $((attempts + 1)))"
             
@@ -106,38 +116,38 @@ jobs:
             
             STATUS=$(echo "$RESPONSE" | jq -r '.data.attributes.status')
             echo "Current status: $STATUS"
-
             case "$STATUS" in
               "planned")
-                echo "Plan is ready, confirming apply..."
+                echo "Plan is ready, confirming apply or destroy..."
                 curl --fail --silent --show-error \
                   --header "Authorization: Bearer $TF_API_TOKEN" \
                   --header "Content-Type: application/vnd.api+json" \
                   --request POST \
                   --data '{"comment": "Auto-approved by GitHub Actions"}' \
                   "https://app.terraform.io/api/v2/runs/$RUN_ID/actions/apply"
-                echo "Apply confirmed successfully"
+                echo "$ACTION confirmed successfully"
                 exit 0
                 ;;
+
               "errored"|"discarded"|"canceled")
                 echo "Run failed with status: $STATUS"
                 exit 1
                 ;;
+
               "applied"|"planned_and_finished")
                 echo "Run completed successfully with status: $STATUS"
                 exit 0
                 ;;
+
               *)
                 echo "Waiting for plan to complete... (status: $STATUS)"
                 ;;
             esac
-
             attempts=$((attempts + 1))
             if [ $attempts -lt $max_attempts ]; then
               echo "Sleeping for $wait_time seconds..."
               sleep $wait_time
             fi
           done
-
           echo "Error: Max attempts ($max_attempts) reached waiting for plan"
           exit 1
