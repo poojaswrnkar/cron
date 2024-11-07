@@ -2,7 +2,7 @@ name: Terraform Apply and Destroy
 
 on:
   schedule:
-    - cron: '45 17 * * *'  # Runs every day at 5:45 PM GMT (which is the same as UTC)
+    - cron: '10 18 * * *'  # Runs every day at 5:45 PM GMT (which is the same as UTC)
   workflow_dispatch:
 
 jobs:
@@ -60,7 +60,7 @@ jobs:
       - name: Wait for 10 Minutes
         run: |
           echo "Waiting for 10 minutes before destroying the server..."
-          sleep 600  # Wait 600 seconds = 10 minutes
+          sleep 600  # Wait 300 seconds = 10 minutes
 
       - name: Trigger Destroy Run
         id: destroy
