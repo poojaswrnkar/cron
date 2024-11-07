@@ -3,9 +3,9 @@ name: Terraform Server Management
 on:
   schedule:
     # Server creation at 3:15 PM UTC
-    - cron: '40 3 * * *'
+    - cron: '10 20 * * *'
     # Server destruction at 3:20 PM UTC
-    - cron: '45 3 * * *'
+    - cron: '10 30 * * *'
   workflow_dispatch:
 
 jobs:
