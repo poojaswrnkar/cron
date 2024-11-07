@@ -2,10 +2,10 @@ name: Terraform Server Management
 
 on:
   schedule:
-    # Server creation at 3:15 PM UTC
-    - cron: '11 2 * * *'
-    # Server destruction at 3:20 PM UTC
-    - cron: '11 4 * * *'
+    # Server creation at 4:30 PM India time (11:00 AM UTC)
+    - cron: '00 11 * * *'
+    # Server destruction at 4:40 PM India time (11:10 AM UTC)
+    - cron: '10 11 * * *'
   workflow_dispatch:
 
 jobs:
@@ -18,146 +18,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create or Destroy Run
-        id: create_run
+      - name: Create or Destroy Server
+        env:
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
         run: |
-          # Get workspace ID using workspace name
-          echo "Fetching workspace ID..."
-          WORKSPACE_RESPONSE=$(curl --fail --silent --show-error \
-            --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
-            --header "Content-Type: application/vnd.api+json" \
-            "https://app.terraform.io/api/v2/organizations/${{ secrets.TF_CLOUD_ORGANIZATION }}/workspaces")
-          
-          echo "$WORKSPACE_RESPONSE" > workspace_response.json
-          
-          WORKSPACE_ID=$(echo "$WORKSPACE_RESPONSE" | jq -r --arg NAME "${{ secrets.TF_WORKSPACE }}" '.data[] | select(.attributes.name == $NAME) | .id')
-          
-          if [ -z "$WORKSPACE_ID" ]; then
-            echo "Error: Could not find workspace with name ${{ secrets.TF_WORKSPACE }}"
-            echo "Available workspaces:"
-            echo "$WORKSPACE_RESPONSE" | jq -r '.data[].attributes.name'
-            exit 1
-          fi
-          echo "Found workspace ID: $WORKSPACE_ID"
-          
           # Get current time in UTC
           current_time=$(date -u +%H:%M)
           echo "Current UTC time is $current_time"
           
-          # Determine action based on the schedule
-          if [[ "$current_time" == "15:15" ]]; then
+          # Check if it's time to create the server
+          if [[ "$current_time" == "11:00" ]]; then
             echo "Creating the server..."
-            ACTION="Create"
-            IS_DESTROY="false"
-          elif [[ "$current_time" == "15:20" ]]; then
+            terraform apply -auto-approve
+          # Check if it's time to destroy the server  
+          elif [[ "$current_time" == "11:10" ]]; then
             echo "Destroying the server..."
-            ACTION="Destroy"
-            IS_DESTROY="true"
+            terraform destroy -auto-approve
           else
             echo "It's not the scheduled time for creation or destruction"
             exit 0
           fi
           
-          # Create or destroy run based on the action
-          echo "Creating or destroying run..."
-          RESPONSE=$(curl --fail --silent --show-error \
-            --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
-            --header "Content-Type: application/vnd.api+json" \
-            --request POST \
-            --data "{
-              \"data\": {
-                \"attributes\": {
-                  \"is-destroy\": $IS_DESTROY,
-                  \"message\": \"Triggered by GitHub Actions - $ACTION\"
-                },
-                \"type\": \"runs\",
-                \"relationships\": {
-                  \"workspace\": {
-                    \"data\": {
-                      \"type\": \"workspaces\",
-                      \"id\": \"${WORKSPACE_ID}\"
-                    }
-                  }
-                }
-              }
-            }" \
-            "https://app.terraform.io/api/v2/runs")
-          
-          echo "$RESPONSE" > run_response.json
-          
-          # Check for errors in response
-          if [ "$(echo "$RESPONSE" | jq -r '.errors')" != "null" ]; then
-            echo "Error creating run: $(echo "$RESPONSE" | jq -r '.errors')"
-            exit 1
-          fi
-          
-          # Check for a valid RUN_ID
-          RUN_ID=$(echo "$RESPONSE" | jq -r '.data.id')
-          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-            echo "Error: Failed to get run ID from response"
-            echo "Response was:"
-            cat run_response.json  # Print the entire response for debugging
-            exit 1
-          fi
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-          echo "Created run with ID: $RUN_ID"
-          
-      - name: Wait and Confirm Apply or Destroy
-        if: steps.create_run.outputs.run_id
-        env:
-          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
-          RUN_ID: ${{ steps.create_run.outputs.run_id }}
+      - name: Terraform Output
+        if: success()
         run: |
-          if [ -z "$RUN_ID" ]; then
-            echo "RUN_ID is empty, skipping Wait and Confirm steps"
-            exit 0
-          fi
-          
-          echo "Starting confirmation process for run: $RUN_ID"
-          
-          attempts=0
-          max_attempts=5
-          wait_time=30  # Wait time between retries (in seconds)
-          
-          while [ $attempts -lt $max_attempts ]; do
-            echo "Checking run status (attempt $((attempts + 1)))"
-            
-            RESPONSE=$(curl --fail --silent --show-error \
-              --header "Authorization: Bearer $TF_API_TOKEN" \
-              "https://app.terraform.io/api/v2/runs/$RUN_ID")
-            
-            STATUS=$(echo "$RESPONSE" | jq -r '.data.attributes.status')
-            echo "Current status: $STATUS"
-            case "$STATUS" in
-              "planned")
-                echo "Plan is ready, confirming apply or destroy..."
-                curl --fail --silent --show-error \
-                  --header "Authorization: Bearer $TF_API_TOKEN" \
-                  --header "Content-Type: application/vnd.api+json" \
-                  --request POST \
-                  --data '{"comment": "Auto-approved by GitHub Actions"}' \
-                  "https://app.terraform.io/api/v2/runs/$RUN_ID/actions/apply"
-                echo "Apply/Destroy confirmed successfully"
-                exit 0
-                ;;
-              "errored"|"discarded"|"canceled")
-                echo "Run failed with status: $STATUS"
-                exit 1
-                ;;
-              "applied"|"planned_and_finished")
-                echo "Run completed successfully with status: $STATUS"
-                exit 0
-                ;;
-              *)
-                echo "Waiting for plan to complete... (status: $STATUS)"
-                ;;
-            esac
-            
-            attempts=$((attempts + 1))
-            if [ $attempts -lt $max_attempts ]; then
-              echo "Sleeping for $wait_time seconds..."
-              sleep $wait_time
-            fi
-          done
-          echo "Error: Max attempts ($max_attempts) reached waiting for plan"
-          exit 1
+          terraform output -json
