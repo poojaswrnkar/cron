@@ -39,7 +39,4 @@ jobs:
             exit 0
           fi
           
-      - name: Terraform Output
-        if: success()
-        run: |
-          terraform output -json
+    
