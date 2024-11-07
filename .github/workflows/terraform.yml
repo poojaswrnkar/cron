@@ -1,10 +1,11 @@
-name: Terraform Cloud Apply with Retry
+name: Terraform Server Management
 
 on:
   schedule:
-    - cron: '0 8 * * 1-5'  # 8 AM UTC Monday-Friday
-    - cron: '0 18 * * 1-5' # 6 PM UTC Monday-Friday
-  workflow_dispatch:
+    # Server creation at 3:15 PM UTC
+    - cron: '15 15 * * *'
+    # Server destruction at 3:20 PM UTC
+    - cron: '20 15 * * *'
 
 jobs:
   terraform:
@@ -16,10 +17,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create Run (Create or Destroy based on action)
+      - name: Create Run (Create or Destroy based on the scheduled time)
         id: create_run
         run: |
-          # First get the workspace ID using workspace name
+          # Get workspace ID using workspace name
           echo "Fetching workspace ID..."
           WORKSPACE_RESPONSE=$(curl --fail --silent --show-error \
             --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
@@ -40,12 +41,21 @@ jobs:
           fi
           echo "Found workspace ID: $WORKSPACE_ID"
           
-          # Define the action (true for destroy, false for apply)
-          ACTION="Apply"  # You can change this dynamically based on the time or condition
-          IS_DESTROY="false"  # Set to "true" if you want to destroy, "false" for apply
+          # Define the action based on the current time (create at 3:15 PM, destroy at 3:20 PM)
+          current_time=$(date +%H:%M)
+          echo "Current time is $current_time"
 
-          if [[ "$ACTION" == "Destroy" ]]; then
+          if [[ "$current_time" == "15:15" ]]; then
+            echo "Creating the server..."
+            ACTION="Create"
+            IS_DESTROY="false"
+          elif [[ "$current_time" == "15:20" ]]; then
+            echo "Destroying the server..."
+            ACTION="Destroy"
             IS_DESTROY="true"
+          else
+            echo "It's not the scheduled time for creation or destruction"
+            exit 0
           fi
 
           # Create or destroy run based on the action
@@ -135,6 +145,7 @@ jobs:
               *)
                 echo "Waiting for plan to complete... (status: $STATUS)"
                 ;;
+
             esac
             
             attempts=$((attempts + 1))
@@ -145,4 +156,3 @@ jobs:
           done
           echo "Error: Max attempts ($max_attempts) reached waiting for plan"
           exit 1
-
