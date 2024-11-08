@@ -1,0 +1,83 @@
+version: 2.1
+
+jobs:
+  terraform-apply:
+    docker:
+      - image: circleci/python:3.8  # Choose an image with curl and jq
+    steps:
+      - checkout
+      - run:
+          name: Trigger Apply Run
+          command: |
+            echo "Starting Terraform apply run..."
+            curl --header "Authorization: Bearer $TF_API_TOKEN" \
+                 --header "Content-Type: application/vnd.api+json" \
+                 --request POST \
+                 --data '{
+                   "data": {
+                     "type": "runs",
+                     "relationships": {
+                       "workspace": {
+                         "data": {
+                           "type": "workspaces",
+                           "id": "$WORKSPACE_ID"
+                         }
+                       }
+                     }
+                   }
+                 }' \
+                 https://app.terraform.io/api/v2/runs
+
+  terraform-destroy:
+    docker:
+      - image: circleci/python:3.8
+    steps:
+      - checkout
+      - run:
+          name: Trigger Destroy Run
+          command: |
+            echo "Starting Terraform destroy run..."
+            curl --header "Authorization: Bearer $TF_API_TOKEN" \
+                 --header "Content-Type: application/vnd.api+json" \
+                 --request POST \
+                 --data '{
+                   "data": {
+                     "type": "runs",
+                     "attributes": {
+                       "is-destroy": true
+                     },
+                     "relationships": {
+                       "workspace": {
+                         "data": {
+                           "type": "workspaces",
+                           "id": "$WORKSPACE_ID"
+                         }
+                       }
+                     }
+                   }
+                 }' \
+                 https://app.terraform.io/api/v2/runs
+
+workflows:
+  version: 2
+  scheduled-apply:
+    triggers:
+      - schedule:
+          cron: "27 18 * * *"  # Run `terraform-apply` daily at 18:27 UTC
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - terraform-apply
+
+  scheduled-destroy:
+    triggers:
+      - schedule:
+          cron: "37 18 * * *"  # Run `terraform-destroy` daily at 18:37 UTC, 10 minutes after apply
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - terraform-destroy
