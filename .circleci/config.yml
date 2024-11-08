@@ -6,6 +6,29 @@ jobs:
       - image: circleci/python:3.8  # Choose an image with curl and jq
     steps:
       - checkout
+
+      # Upload Configuration Step
+      - run:
+          name: Upload Configuration
+          command: |
+            curl --header "Authorization: Bearer $TF_API_TOKEN" \
+                 --header "Content-Type: application/vnd.api+json" \
+                 --request POST \
+                 --data '{
+                   "data": {
+                     "type": "configuration-versions",
+                     "relationships": {
+                       "workspace": {
+                         "data": {
+                           "type": "workspaces",
+                           "id": "$WORKSPACE_ID"
+                         }
+                       }
+                     }
+                   }
+                 }' \
+                 https://app.terraform.io/api/v2/configuration-versions
+
       - run:
           name: Trigger Apply Run
           command: |
@@ -33,6 +56,29 @@ jobs:
       - image: circleci/python:3.8
     steps:
       - checkout
+
+      # Upload Configuration Step (optional, if needed before destroy)
+      - run:
+          name: Upload Configuration
+          command: |
+            curl --header "Authorization: Bearer $TF_API_TOKEN" \
+                 --header "Content-Type: application/vnd.api+json" \
+                 --request POST \
+                 --data '{
+                   "data": {
+                     "type": "configuration-versions",
+                     "relationships": {
+                       "workspace": {
+                         "data": {
+                           "type": "workspaces",
+                           "id": "$WORKSPACE_ID"
+                         }
+                       }
+                     }
+                   }
+                 }' \
+                 https://app.terraform.io/api/v2/configuration-versions
+
       - run:
           name: Trigger Destroy Run
           command: |
