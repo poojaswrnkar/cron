@@ -3,7 +3,7 @@ version: 2.1
 jobs:
   terraform-apply:
     docker:
-      - image: circleci/python:3.8  # Choose an image with curl and jq
+      - image: circleci/python:3.8
     steps:
       - checkout
 
@@ -11,12 +11,17 @@ jobs:
       - run:
           name: Upload Configuration
           command: |
-            curl --header "Authorization: Bearer $TF_API_TOKEN" \
+            # First create the configuration version
+            echo "Creating configuration version..."
+            config_response=$(curl --header "Authorization: Bearer $TF_API_TOKEN" \
                  --header "Content-Type: application/vnd.api+json" \
                  --request POST \
                  --data '{
                    "data": {
                      "type": "configuration-versions",
+                     "attributes": {
+                       "auto-queue-runs": false
+                     },
                      "relationships": {
                        "workspace": {
                          "data": {
@@ -27,7 +32,23 @@ jobs:
                      }
                    }
                  }' \
-                 https://app.terraform.io/api/v2/configuration-versions
+                 https://app.terraform.io/api/v2/configuration-versions)
+            
+            # Extract the upload URL from the response
+            upload_url=$(echo $config_response | jq -r '.data.attributes."upload-url"')
+            
+            # Create a tar.gz of your Terraform configuration
+            tar -czf config.tar.gz *.tf
+            
+            # Upload the configuration
+            echo "Uploading Terraform configuration..."
+            curl --header "Content-Type: application/octet-stream" \
+                 --request PUT \
+                 --data-binary @config.tar.gz \
+                 "$upload_url"
+            
+            # Wait a few seconds for the configuration to be processed
+            sleep 10
 
       - run:
           name: Trigger Apply Run
@@ -39,6 +60,10 @@ jobs:
                  --data '{
                    "data": {
                      "type": "runs",
+                     "attributes": {
+                       "is-destroy": false,
+                       "auto-apply": true
+                     },
                      "relationships": {
                        "workspace": {
                          "data": {
@@ -57,16 +82,20 @@ jobs:
     steps:
       - checkout
 
-      # Upload Configuration Step (optional, if needed before destroy)
       - run:
           name: Upload Configuration
           command: |
-            curl --header "Authorization: Bearer $TF_API_TOKEN" \
+            # First create the configuration version
+            echo "Creating configuration version..."
+            config_response=$(curl --header "Authorization: Bearer $TF_API_TOKEN" \
                  --header "Content-Type: application/vnd.api+json" \
                  --request POST \
                  --data '{
                    "data": {
                      "type": "configuration-versions",
+                     "attributes": {
+                       "auto-queue-runs": false
+                     },
                      "relationships": {
                        "workspace": {
                          "data": {
@@ -77,7 +106,23 @@ jobs:
                      }
                    }
                  }' \
-                 https://app.terraform.io/api/v2/configuration-versions
+                 https://app.terraform.io/api/v2/configuration-versions)
+            
+            # Extract the upload URL from the response
+            upload_url=$(echo $config_response | jq -r '.data.attributes."upload-url"')
+            
+            # Create a tar.gz of your Terraform configuration
+            tar -czf config.tar.gz *.tf
+            
+            # Upload the configuration
+            echo "Uploading Terraform configuration..."
+            curl --header "Content-Type: application/octet-stream" \
+                 --request PUT \
+                 --data-binary @config.tar.gz \
+                 "$upload_url"
+            
+            # Wait a few seconds for the configuration to be processed
+            sleep 10
 
       - run:
           name: Trigger Destroy Run
@@ -90,7 +135,8 @@ jobs:
                    "data": {
                      "type": "runs",
                      "attributes": {
-                       "is-destroy": true
+                       "is-destroy": true,
+                       "auto-apply": true
                      },
                      "relationships": {
                        "workspace": {
@@ -109,7 +155,7 @@ workflows:
   scheduled-apply:
     triggers:
       - schedule:
-          cron: "00 1 * * *"
+          cron: "15 1 * * *"
           filters:
             branches:
               only:
@@ -120,7 +166,7 @@ workflows:
   scheduled-destroy:
     triggers:
       - schedule:
-          cron: "15 1 * * *"
+          cron: "20 1 * * *"
           filters:
             branches:
               only:
