@@ -63,7 +63,7 @@ workflows:
   scheduled-apply:
     triggers:
       - schedule:
-          cron: "59 11 * * *"
+          cron: "00 1 * * *"
           filters:
             branches:
               only:
@@ -74,7 +74,7 @@ workflows:
   scheduled-destroy:
     triggers:
       - schedule:
-          cron: "15 12 * * *"
+          cron: "15 1 * * *"
           filters:
             branches:
               only:
