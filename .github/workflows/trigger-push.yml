@@ -1,0 +1,22 @@
+name: Trigger Push for Terraform Workflow
+
+on:
+  schedule:
+    - cron: "45 18 * * *"
+
+jobs:
+  trigger-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Update Test File
+        run: |
+          echo "Triggered at $(date)" > trigger.txt  # Update a test file to create a new commit
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add trigger.txt
+          git commit -m "Trigger Terraform workflow - $(date)"
+          git push origin main
