@@ -2,7 +2,7 @@ name: Trigger Push for Terraform Workflow
 
 on:
   schedule:
-    - cron: "45 18 * * *"
+    - cron: "55 5 * * *"
 
 jobs:
   trigger-push:
