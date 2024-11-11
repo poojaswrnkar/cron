@@ -1,8 +1,8 @@
 name: Terraform Apply and Destroy
 
 on:
-  schedule:
-    - cron: '57 12 * * *'  # Runs every day at 5:45 PM GMT (which is the same as UTC)
+#  schedule:
+ #   - cron: '57 12 * * *'  # Runs every day at 5:45 PM GMT (which is the same as UTC)
   workflow_dispatch:
 
 jobs:
