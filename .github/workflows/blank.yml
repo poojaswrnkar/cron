@@ -1,0 +1,61 @@
+name: Terraform Destroy
+
+on:
+  schedule:
+    - cron: '10 6 * * *'  # Runs every day at 13:07 UTC, 10 minutes after the apply job
+  workflow_dispatch:
+
+jobs:
+  terraform-destroy:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Upload Configuration
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
+        id: upload
+        with:
+          workspace: "${{ secrets.TF_WORKSPACE }}"
+          directory: "."
+        env:
+          TF_CLOUD_ORGANIZATION: "${{ secrets.TF_CLOUD_ORGANIZATION }}"
+          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
+
+      - name: Trigger Destroy Run
+        id: destroy
+        run: |
+          echo "Triggering destroy..."
+          curl --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
+               --header "Content-Type: application/vnd.api+json" \
+               --request POST \
+               --data '{
+                 "data": {
+                   "type": "runs",
+                   "attributes": {
+                     "is-destroy": true
+                   },
+                   "relationships": {
+                     "workspace": {
+                       "data": {
+                         "type": "workspaces",
+                         "id": "${{ secrets.WORKSPACE_ID }}"
+                       }
+                     }
+                   }
+                 }
+               }' \
+               https://app.terraform.io/api/v2/runs \
+               --silent --show-error --fail --output response.json
+        env:
+          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
+
+      - name: Extract Destroy Run ID
+        id: extract_destroy_run_id
+        run: |
+          destroy_run_id=$(jq -r '.data.id' response.json)
+          echo "destroy_run_id=$destroy_run_id" >> $GITHUB_ENV
+          echo "::set-output name=destroy_run_id::$destroy_run_id"
