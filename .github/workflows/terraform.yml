@@ -1,12 +1,12 @@
-name: Terraform Apply and Destroy
+name: Terraform Apply
 
 on:
-#  schedule:
- #   - cron: '57 12 * * *'  # Runs every day at 5:45 PM GMT (which is the same as UTC)
+  schedule:
+    - cron: '00 6 * * *'  # Runs every day at 12:57 UTC
   workflow_dispatch:
 
 jobs:
-  terraform:
+  terraform-apply:
     runs-on: ubuntu-24.04
 
     steps:
@@ -56,43 +56,3 @@ jobs:
           run_id=$(jq -r '.data.id' response.json)
           echo "apply_run_id=$run_id" >> $GITHUB_ENV
           echo "::set-output name=apply_run_id::$run_id"
-
-      - name: Wait for 10 Minutes
-        run: |
-          echo "Waiting for 10 minutes before destroying the server..."
-          sleep 600  # Wait 300 seconds = 10 minutes
-
-      - name: Trigger Destroy Run
-        id: destroy
-        run: |
-          echo "Triggering destroy..."
-          curl --header "Authorization: Bearer ${{ secrets.TF_API_TOKEN }}" \
-               --header "Content-Type: application/vnd.api+json" \
-               --request POST \
-               --data '{
-                 "data": {
-                   "type": "runs",
-                   "attributes": {
-                     "is-destroy": true
-                   },
-                   "relationships": {
-                     "workspace": {
-                       "data": {
-                         "type": "workspaces",
-                         "id": "${{ secrets.WORKSPACE_ID }}"
-                       }
-                     }
-                   }
-                 }
-               }' \
-               https://app.terraform.io/api/v2/runs \
-               --silent --show-error --fail --output response.json
-        env:
-          TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
-
-      - name: Extract Destroy Run ID
-        id: extract_destroy_run_id
-        run: |
-          destroy_run_id=$(jq -r '.data.id' response.json)
-          echo "destroy_run_id=$destroy_run_id" >> $GITHUB_ENV
-          echo "::set-output name=destroy_run_id::$destroy_run_id"
